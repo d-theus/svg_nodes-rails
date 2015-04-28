@@ -8,6 +8,11 @@ class SvgNodes.Map
     @w = params.w
     @h = params.h
     @svg = Snap(parent) || Snap(@w, @h)
+    @bbox = {
+      x: @svg.node.getBoundingClientRect().x
+      y: @svg.node.getBoundingClientRect().y
+    }
+
 
     @nodes = []
     @edges = []
@@ -17,7 +22,8 @@ class SvgNodes.Map
         fill: 'white',
         stroke: 'black',
         strokeWidth: 1.5,
-        fillOpacity: 1
+        fillOpacity: 1,
+        draggable: true
       },
       edges: {
         stroke: 'black',
@@ -35,6 +41,7 @@ class SvgNodes.Map
       node.label
     )
     @nodes.push(n)
+    n
 
   addEdge: (edge)->
     src = this.fetchNode(edge.from)
@@ -46,25 +53,32 @@ class SvgNodes.Map
       des
     )
     @edges.push(e)
+    e
 
   fetchNode: (id)->
     @nodes.find (node)->
       node.id == id
 
+  clear: =>
+    @nodes.splice(0,@nodes.length)
+    @edges.splice(0,@edges.length)
+    @svg.clear()
+
 class SvgNodes.Responsible
   constructor: ->
-    @svg.click ->
-      for fn in @_clickHandlers
-        fn()
-    @svg.drag ->
-      for fn in @_dragHandlers
-        fn()
-
-  onClick: (fn)->
+  onClick: (fn, bubbling = true)=>
     @_clickHandlers.push(fn)
+    self = this
+    @svg.click (e)->
+      fn() for fn in self._clickHandlers
+      e.stopPropagation() unless bubbling
 
-  onDrag:  (fn)->
+  onDrag:  (fn, bubbling = true)=>
     @_dragHandlers.push(fn)
+    self = this
+    @svg.drag (e)->
+      fn() for fn in self._dragHandlers
+      e.stopPropagation() unless bubbling
 
 class SvgNodes.Node extends SvgNodes.Responsible
   constructor: (@map, @id, @x, @y, @r, @text, @style)->
@@ -73,8 +87,39 @@ class SvgNodes.Node extends SvgNodes.Responsible
     @svg = @map.svg.circle(@x, @y, @r)
     @label = new SvgNodes.Label(@map, @x + @r, @y + @r, @text)
     @svg.attr(@map.options.nodes)
-    this.onClick ->
-      alert "Fancy click"
+    this.setDraggable(@map) if @map.options.nodes.draggable
+
+  setDraggable: (map, draggable = true) =>
+    return unless draggable
+    node = this
+    this.svg.drag (dx, dy, x, y, e)=>
+      x = x - map.bbox.x
+      y = y - map.bbox.y
+      this.move(x,y)
+
+  move: (x, y)=>
+    @x = x
+    @y = y
+    this.attr
+      cx: @x
+      cy: @y
+    this._moveEdges()
+    this._moveLabel()
+
+  _moveEdges: =>
+    @map.edges.forEach (e)=>
+      if e.src.id == @id
+        e.svg.attr
+          x1: @x
+          y1: @y
+      if e.dest.id == @id
+        e.svg.attr
+          x2: @x
+          y2: @y
+  _moveLabel: =>
+    @label.svg.attr
+      x: @x + @r
+      y: @y + @r
 
   attr: (hash)->
     @svg.attr(hash)
