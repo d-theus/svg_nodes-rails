@@ -1,9 +1,6 @@
 window.SvgNodes = {}
 
 class SvgNodes.Map
-  
-  this._eventNameToHandlerName = (en) ->
-    en.replace ':', '_'
   constructor: (parent = null, params = {} )->
     @w = params.w
     @h = params.h
@@ -118,9 +115,10 @@ class SvgNodes.Map
     m.scale(@transformations.zoom)
     @svg.transform(m)
 
-  _freeze: ()=>
+  freeze: ()=>
     @interactive = false
-    setTimeout =>
+    clearTimeout(@_freezeTimeout) if @_freezeTimeout
+    @_freezeTimeout = setTimeout =>
       @interactive = true
     , 500
 
@@ -136,27 +134,53 @@ class SvgNodes.Map
   enableInteractivity: ()=>
     map = this
     @svg.click (e)->
+      e.stopPropagation()
+      return unless map.interactive
       key = switch e.target.tagName
         when 'svg' then 'click:map'
         when 'circle' then 'click:node'
+      return unless key?
       fn(e) for fn in map.handlers[key]
+      true
+
     @svg.drag (dx, dy, x, y, e) ->
+      e.stopPropagation()
+      map._dxdy = 1 if dx*dy > 0
+      return unless map.interactive
       key = switch e.target.tagName
         when 'svg' then 'drag:map:move'
         when 'circle' then 'drag:node:move'
+      return unless key?
       fn(dx, dy, x, y, e) for fn in map.handlers[key]
+      true
+
     ,         (x, y, e) ->
+      e.stopPropagation()
+      map._dxdy = 0
+      return unless map.interactive
       key = switch e.target.tagName
         when 'svg' then 'drag:map:start'
         when 'circle' then 'drag:node:start'
+      return unless key?
       fn(x, y, e) for fn in map.handlers[key]
+      true
+
     ,         (e) ->
+      e.stopPropagation()
+      return unless map.interactive
       key = switch e.target.tagName
         when 'svg' then 'drag:map:end'
         when 'circle' then 'drag:node:end'
+      return unless key?
       fn(e) for fn in map.handlers[key]
+      map.freeze() if map._dxdy > 0
+      true
+
     @svg.node.addEventListener 'wheel', (e)->
+      e.stopPropagation()
+      return unless map.interactive
       fn(e) for fn in map.handlers['zoom']
+      true
 
 
   _setDefaultHandlers: () =>
@@ -172,46 +196,33 @@ class SvgNodes.Map
   ###
   # HANDLERS
   ###
-  # FIXME:
-  # fix drag -> click behavior
-  #
   
   _onMapClick: (e) =>
-    e.stopPropagation()
-    return unless @interactive
     this.deselectAll() unless e.ctrlKey
+  _onMapDrag: (dx, dy, x, y, e) =>
+    @transformations.dx = dx
+    @transformations.dy = dy
+    this._applyTransformations()
+  _onMapDragStart: (x, y, e) =>
+  _onMapDragEnd: (e) =>
+    @transformations.x += @transformations.dx
+    @transformations.y += @transformations.dy
+    @transformations.dx = 0
+    @transformations.dy = 0
   _onNodeClick: (e) =>
-    e.stopPropagation()
-    return unless @interactive
     node = this.fetchNode(e.target.node_id)
     if e.target.node_id in this.getSelectedIds()
       this.deselect(node)
     else
       this.select(node, e.ctrlKey)
-    this._freeze()
   _onNodeDragStart: (x, y, e) =>
-    node = this.fetchNode(e.target.node_id)
-    this.select(node)
   _onNodeDrag: (dx, dy, x, y, e) =>
-    @selection[0].move(x+dx, y+dy)
+    return if dx*dy = 0
+    return unless node = @selection[0]
+    x = e.clientX - @bbox.x - @transformations.x
+    y = e.clientY - @bbox.y - @transformations.y
+    node.move(x, y)
   _onNodeDragEnd: (e) =>
-    this._freeze()
-  _onMapDrag: (dx, dy, x, y, e) =>
-    e.stopPropagation()
-    return unless dx*dy > 0
-    @transformations.dx = dx
-    @transformations.dy = dy
-    this._applyTransformations()
-    this._freeze()
-  _onMapDragStart: (x, y, e) =>
-    e.stopPropagation()
-  _onMapDragEnd: (e) =>
-    e.stopPropagation()
-    @transformations.x = @transformations.dx
-    @transformations.y = @transformations.dy
-    @transformations.dx = 0
-    @transformations.dy = 0
-    this._freeze()
   _onScroll: (e) =>
     factor = e.deltaY * 0.05
     @transformations.zoom += factor
@@ -228,21 +239,6 @@ class SvgNodes.Node
     @svg.node.node_id = @id
     @label = new SvgNodes.Label(@map, @x + @r, @y + @r, @text)
     @svg.attr(@map.options.nodes)
-    #this.setDraggable() if @map.options.nodes.draggable
-    #this.setSelectable()
-
-  #setDraggable: () =>
-    #@svg.drag (dx, dy, x, y, e)=>
-      #x = x - @map.bbox.x
-      #y = y - @map.bbox.y
-      #this.move(x,y)
-      #@map.interactive = false
-
-  #setSelectable: =>
-    #@svg.click (e)=>
-      #if not @highlighted then this.highlight() else this.dim()
-      #@map.select(this)
-      #e.stopPropagation()
 
   move: (x, y)=>
     @x = x
@@ -255,12 +251,12 @@ class SvgNodes.Node
 
   highlight: =>
     @highlighted = true
-    @svg.transform(Snap.matrix().scale(1.1, 1.1, @x, @y))
+    #@svg.transform(Snap.matrix().scale(1.1, 1.1, @x, @y))
     @label.attr(fontWeight: 'bold')
 
   dim: =>
     @highlighted = false
-    @svg.transform(Snap.matrix())
+    #@svg.transform(Snap.matrix())
     @label.attr(fontWeight: 'normal')
 
   _moveEdges: =>
